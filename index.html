@@ -529,6 +529,9 @@
       .stats-grid { grid-template-columns: 1fr; }
       .wizard-progress { flex-wrap: wrap; }
       .btn-group { flex-direction: column; }
+      input[type="text"] {
+        font-size: 16px !important; /* Prevent zoom on iOS */
+      }
     }
 
     /* Animations */
@@ -626,7 +629,8 @@
       const [step, setStep] = useState(1);
       const [libraryFiles, setLibraryFiles] = useState(null);
       const [libraryPath, setLibraryPath] = useState("");
-      const [selectionMethod, setSelectionMethod] = useState(""); // "filesystem" or "input"
+      const [manualPath, setManualPath] = useState("");
+      const [selectionMethod, setSelectionMethod] = useState(""); // "browse" or "manual"
       const [formatConfig, setFormatConfig] = useState({
         folderFormat: "author-series-book",
         fileFormat: "full-details"
@@ -637,6 +641,7 @@
       const [executionProgress, setExecutionProgress] = useState(0);
       const [executionResults, setExecutionResults] = useState(null);
       const fileInputRef = useRef(null);
+      const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
       const handleFileSelect = async (event) => {
         const files = Array.from(event.target.files);
@@ -648,7 +653,14 @@
         
         setLibraryFiles(files);
         setLibraryPath(rootFolder);
-        setSelectionMethod("input");
+        setSelectionMethod("browse");
+      };
+
+      const handleManualPath = () => {
+        if (manualPath.trim()) {
+          setLibraryPath(manualPath.trim());
+          setSelectionMethod("manual");
+        }
       };
 
       const handleFolderClick = () => {
@@ -910,6 +922,329 @@ echo
         URL.revokeObjectURL(url);
       };
 
+      const generateStandalonePythonScript = () => {
+        const script = `#!/usr/bin/env python3
+"""
+Audiobookshelf Library Tidy Tool
+Generated on ${new Date().toLocaleString()}
+
+This is a standalone script that will scan and reorganize your library.
+Configuration:
+  - Folder Format: ${formatConfig.folderFormat === 'author-series-book' ? 'Author / Series / Book' : 'Author / Book'}
+  - File Format: ${formatConfig.fileFormat === 'full-details' ? 'Full Details' : formatConfig.fileFormat === 'title-only' ? 'Title Only' : 'Keep Original'}
+
+Usage:
+  python3 tidy_library.py /path/to/your/library
+  
+Example:
+  python3 tidy_library.py "//192.168.1.100/audiobooks"
+  python3 tidy_library.py "Z:/audiobooks"
+"""
+
+import os
+import json
+import re
+import shutil
+import sys
+from pathlib import Path
+
+def natural_sort_key(s):
+    return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\\d+)', str(s))]
+
+def clean_metadata(value):
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        return clean_metadata(value[0]) if len(value) > 0 else ""
+    s = str(value)
+    if "," in s:
+        s = s.split(",")[0]
+    s = re.sub(r"^\\[['\\"]", "", s)
+    s = re.sub(r"['\\"]\\]$", "", s)
+    return s.strip()
+
+def clean_filename(name):
+    if not name:
+        return ""
+    invalid_chars = '<>:"/\\\\|?*'
+    for char in invalid_chars:
+        name = name.replace(char, '')
+    return re.sub(r'\\s+', ' ', name).strip()
+
+def get_metadata_value(data, key_names):
+    if isinstance(key_names, str):
+        key_names = [key_names]
+    for key in key_names:
+        if data.get(key) is not None:
+            return clean_metadata(data.get(key))
+    meta = data.get('metadata', {})
+    if isinstance(meta, dict):
+        for key in key_names:
+            if meta.get(key) is not None:
+                return clean_metadata(meta.get(key))
+    return ""
+
+def scan_library(root_path):
+    """Scan library and build move plan"""
+    print(f"Scanning library: {root_path}")
+    
+    meta_files = list(root_path.rglob('metadata.json'))
+    print(f"Found {len(meta_files)} books")
+    
+    audio_extensions = {'.mp3', '.m4b', '.m4a', '.flac', '.ogg'}
+    planned_moves = []
+    
+    for meta_path in meta_files:
+        old_book_dir = meta_path.parent
+        try:
+            with open(meta_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            author = get_metadata_value(data, ['authorName', 'author', 'authors', 'bookAuthor']) or "Unknown Author"
+            book_title = get_metadata_value(data, ['title', 'bookTitle']) or "Unknown Title"
+            series_field = get_metadata_value(data, ['seriesName', 'series']) or ""
+            
+            series_title = ""
+            book_number = ""
+            if "#" in series_field:
+                parts = series_field.split("#")
+                series_title = clean_filename(parts[0])
+                raw_num = parts[1].strip()
+                if "." in raw_num:
+                    n_p = raw_num.split(".")
+                    book_number = f"{n_p[0].zfill(2)}.{n_p[1]}"
+                elif raw_num.isdigit():
+                    book_number = raw_num.zfill(2)
+                else:
+                    book_number = raw_num
+            else:
+                series_title = clean_filename(series_field)
+            
+            c_author = clean_filename(author)
+            c_title = clean_filename(book_title)
+            
+            # Build target path based on config
+            ${formatConfig.folderFormat === 'author-series-book' ? `
+            if series_title:
+                folder_label = f"{book_number} {c_title}".strip() if book_number else c_title
+                target_dir = root_path / c_author / series_title / folder_label
+            else:
+                target_dir = root_path / c_author / c_title
+            ` : `
+            target_dir = root_path / c_author / c_title
+            `}
+            
+            all_items = list(old_book_dir.iterdir())
+            audio_files = sorted([f for f in all_items if f.suffix.lower() in audio_extensions], 
+                               key=lambda x: natural_sort_key(x.name))
+            
+            move_plan = []
+            num_audio = len(audio_files)
+            
+            for i, old_path in enumerate(audio_files, start=1):
+                ${formatConfig.fileFormat === 'full-details' ? `
+                name_parts = [c_author]
+                if series_title:
+                    name_parts.append(f"{series_title} {book_number}".strip())
+                name_parts.append(c_title)
+                base_name = " - ".join([p for p in name_parts if p])
+                final_filename = f"{base_name}{' - ' + str(i).zfill(2) if num_audio > 1 else ''}{old_path.suffix}"
+                ` : formatConfig.fileFormat === 'title-only' ? `
+                final_filename = f"{c_title}{' - ' + str(i).zfill(2) if num_audio > 1 else ''}{old_path.suffix}"
+                ` : `
+                final_filename = old_path.name
+                `}
+                move_plan.append((old_path, target_dir / clean_filename(final_filename)))
+            
+            for f in all_items:
+                if f.is_file() and f not in audio_files:
+                    move_plan.append((f, target_dir / f.name))
+            
+            if (old_book_dir.resolve() != target_dir.resolve()) or any(old.name != new.name for old, new in move_plan):
+                planned_moves.append({
+                    'title': book_title,
+                    'author': author,
+                    'old_dir': old_book_dir,
+                    'target_dir': target_dir,
+                    'move_plan': move_plan
+                })
+        except Exception as e:
+            print(f"Error processing {meta_path}: {e}")
+    
+    return planned_moves
+
+def execute_moves(planned_moves):
+    """Execute the file moves"""
+    for i, book in enumerate(planned_moves, 1):
+        print(f"\\n[{i}/{len(planned_moves)}] {book['title']}")
+        
+        target_dir = book['target_dir']
+        old_book_dir = book['old_dir']
+        
+        try:
+            target_dir.mkdir(parents=True, exist_ok=True)
+            
+            for old_f, new_f in book['move_plan']:
+                if old_f.is_file():
+                    if new_f.exists() and old_f.resolve() == new_f.resolve():
+                        continue
+                    
+                    if new_f.exists():
+                        print(f"  ⚠️  CONFLICT: {new_f.name} already exists")
+                        continue
+                    
+                    shutil.move(str(old_f), str(new_f))
+                    print(f"  ✓ {old_f.name} -> {new_f.name}")
+            
+            if old_book_dir.exists() and not any(old_book_dir.iterdir()):
+                shutil.rmtree(old_book_dir)
+                print(f"  ✓ Removed empty directory")
+                
+        except Exception as e:
+            print(f"  ✗ ERROR: {e}")
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python3 tidy_library.py /path/to/library")
+        print("Example: python3 tidy_library.py \\"//server/audiobooks\\"")
+        sys.exit(1)
+    
+    root_path = Path(sys.argv[1])
+    
+    if not root_path.exists() or not root_path.is_dir():
+        print(f"ERROR: Path does not exist or is not a directory: {root_path}")
+        sys.exit(1)
+    
+    print("="*60)
+    print("Audiobookshelf Library Tidy Tool")
+    print("="*60)
+    
+    planned_moves = scan_library(root_path)
+    
+    if not planned_moves:
+        print("\\n✨ Your library is already tidy! No changes needed.")
+        return
+    
+    print(f"\\nFound {len(planned_moves)} books to reorganize.")
+    print("\\nOptions:")
+    print("  [1] Apply ALL changes")
+    print("  [2] Exit")
+    
+    choice = input("\\nYour choice: ").strip()
+    
+    if choice == '1':
+        print("\\nApplying changes...")
+        execute_moves(planned_moves)
+        print("\\n" + "="*60)
+        print("✓ Library organization complete!")
+        print("="*60)
+    else:
+        print("\\nExited without making changes.")
+
+if __name__ == "__main__":
+    main()
+`;
+
+        const blob = new Blob([script], { type: 'text/x-python' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'tidy_library.py';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      };
+        if (!scanResults || !scanResults.plannedMoves.length) return;
+
+        const script = `#!/usr/bin/env python3
+"""
+Audiobookshelf Library Tidy Script
+Generated on ${new Date().toLocaleString()}
+
+This script will reorganize your audiobook library based on the
+configuration you selected in the web app.
+
+Usage:
+  python3 tidy_library.py
+"""
+
+import os
+import shutil
+from pathlib import Path
+
+# Base library path - UPDATE THIS to match your network share path
+LIBRARY_ROOT = r"${libraryPath}"
+
+def main():
+    print("Audiobookshelf Library Tidy Tool")
+    print("=" * 60)
+    print(f"Library path: {LIBRARY_ROOT}")
+    print(f"Books to process: ${scanResults.plannedMoves.length}")
+    print("=" * 60)
+    
+    if not os.path.exists(LIBRARY_ROOT):
+        print(f"ERROR: Library path does not exist: {LIBRARY_ROOT}")
+        print("Please update the LIBRARY_ROOT variable at the top of this script.")
+        return
+    
+    changes = ${JSON.stringify(scanResults.plannedMoves, null, 2)}
+    
+    for i, book in enumerate(changes, 1):
+        print(f"\\n[{i}/${scanResults.plannedMoves.length}] Processing: {book['title']}")
+        
+        # Create target directory
+        target_dir = Path(LIBRARY_ROOT) / book['newPath']
+        target_dir.mkdir(parents=True, exist_ok=True)
+        print(f"  Target: {target_dir}")
+        
+        # Move files
+        for file_move in book['movePlan']:
+            old_path = Path(LIBRARY_ROOT) / file_move['oldPath']
+            new_path = target_dir / file_move['newName']
+            
+            if old_path.exists():
+                if new_path.exists() and old_path.resolve() == new_path.resolve():
+                    continue  # Same file, skip
+                    
+                if new_path.exists():
+                    print(f"  ⚠️  CONFLICT: {new_path.name} already exists, skipping")
+                    continue
+                
+                try:
+                    shutil.move(str(old_path), str(new_path))
+                    print(f"  ✓ Moved: {file_move['oldName']}")
+                except Exception as e:
+                    print(f"  ✗ ERROR: {e}")
+        
+        # Clean up empty directories
+        old_dir = Path(LIBRARY_ROOT) / book['oldPath']
+        if old_dir.exists() and not any(old_dir.iterdir()):
+            try:
+                old_dir.rmdir()
+                print(f"  ✓ Removed empty directory")
+            except:
+                pass
+    
+    print("\\n" + "=" * 60)
+    print("Library organization complete!")
+    print("=" * 60)
+
+if __name__ == "__main__":
+    main()
+`;
+
+        const blob = new Blob([script], { type: 'text/x-python' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'tidy_library.py';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      };
+
       const executeChanges = async () => {
         if (!scanResults || !scanResults.plannedMoves.length) return;
 
@@ -937,9 +1272,17 @@ echo
       };
 
       const nextStep = () => {
-        if (step === 1 && libraryFiles) {
+        if (step === 1 && (libraryFiles || selectionMethod === "manual")) {
           setStep(2);
-        } else if (step === 2) {
+        } else if (step === 2 && selectionMethod === "manual") {
+          // Skip scanning for manual path, go straight to script generation
+          setStep(4);
+          // Create dummy scan results for script generation
+          setScanResults({
+            stats: { books: 0, authors: 0, narrators: 0, series: 0, standalone: 0, totalDuration: 0, totalSize: 0 },
+            plannedMoves: []
+          });
+        } else if (step === 2 && libraryFiles) {
           setStep(3);
           scanLibrary();
         } else if (step === 3 && scanResults) {
@@ -957,6 +1300,8 @@ echo
         setStep(1);
         setLibraryFiles(null);
         setLibraryPath("");
+        setManualPath("");
+        setSelectionMethod("");
         setScanResults(null);
         setExecutionResults(null);
         setExecutionProgress(0);
@@ -991,8 +1336,12 @@ echo
               {step === 1 && (
                 <StepSelectLibrary 
                   libraryPath={libraryPath}
+                  manualPath={manualPath}
+                  setManualPath={setManualPath}
                   onSelect={handleFolderClick}
+                  onManualSubmit={handleManualPath}
                   onNext={nextStep}
+                  isMobile={isMobile}
                 />
               )}
 
@@ -1019,8 +1368,10 @@ echo
                   scanResults={scanResults}
                   isExecuting={isExecuting}
                   executionProgress={executionProgress}
+                  selectionMethod={selectionMethod}
                   onExecute={executeChanges}
                   onGenerateScript={generateMoveScript}
+                  onGeneratePython={selectionMethod === "manual" ? generateStandalonePythonScript : generatePythonScript}
                   onBack={prevStep}
                 />
               )}
@@ -1065,27 +1416,89 @@ echo
       );
     }
 
-    function StepSelectLibrary({ libraryPath, onSelect, onNext }) {
+    function StepSelectLibrary({ libraryPath, manualPath, setManualPath, onSelect, onManualSubmit, onNext, isMobile }) {
+      const [inputMode, setInputMode] = React.useState(isMobile ? 'manual' : 'browse');
+      
       return (
         <div className="card">
           <h2>📁 Select Your Library Location</h2>
           <p style={{ marginTop: '1rem', color: 'var(--color-text-muted)' }}>
-            Choose the root directory of your Audiobookshelf library. The app will scan for metadata.json files to organize your collection.
-            <strong> Works with network folders and mapped drives!</strong>
+            Choose the root directory of your Audiobookshelf library. The app will generate a script to organize your collection.
           </p>
 
-          <div className="alert alert-info" style={{ marginTop: '2rem' }}>
-            <strong>💡 Tip:</strong> This works with local folders, network shares (\\server\share), and mapped drives. 
-            Simply browse to your library location.
+          {isMobile && (
+            <div className="alert alert-warning" style={{ marginTop: '2rem' }}>
+              <strong>📱 Mobile Device Detected</strong>
+              <p style={{ marginTop: '0.5rem' }}>
+                Android file pickers don't support network shares. Use "Enter Path Manually" and provide your network path 
+                (e.g., //192.168.1.100/audiobooks or /storage/XXXX/audiobooks). The app will generate a Python script 
+                you can run on your server or desktop.
+              </p>
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: '1rem', marginTop: '2rem', marginBottom: '1.5rem' }}>
+            <button 
+              className={inputMode === 'browse' ? 'btn btn-primary' : 'btn btn-secondary'}
+              onClick={() => setInputMode('browse')}
+              style={{ flex: 1 }}
+            >
+              Browse Folder
+            </button>
+            <button 
+              className={inputMode === 'manual' ? 'btn btn-primary' : 'btn btn-secondary'}
+              onClick={() => setInputMode('manual')}
+              style={{ flex: 1 }}
+            >
+              Enter Path Manually
+            </button>
           </div>
 
-          {!libraryPath && (
+          {inputMode === 'browse' && !libraryPath && (
             <div className="file-picker" onClick={onSelect}>
               <div className="file-picker-icon">📂</div>
-              <div className="file-picker-text">Click to select library folder</div>
+              <div className="file-picker-text">Click to browse and select library folder</div>
               <div style={{ fontSize: '0.9rem', color: 'var(--color-text-muted)', marginTop: '0.5rem' }}>
-                Local folders, network shares, and mapped drives supported
+                Works best on desktop with local folders or mapped drives
               </div>
+            </div>
+          )}
+
+          {inputMode === 'manual' && !libraryPath && (
+            <div style={{ marginTop: '1rem' }}>
+              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600 }}>
+                Library Path:
+              </label>
+              <input 
+                type="text"
+                value={manualPath}
+                onChange={(e) => setManualPath(e.target.value)}
+                placeholder="e.g., //192.168.1.100/audiobooks or Z:/audiobooks or /mnt/audiobooks"
+                style={{
+                  width: '100%',
+                  padding: '0.875rem',
+                  borderRadius: '8px',
+                  border: '2px solid var(--color-border)',
+                  fontSize: '1rem',
+                  fontFamily: 'monospace'
+                }}
+              />
+              <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginTop: '0.5rem' }}>
+                Examples:
+                <ul style={{ marginTop: '0.25rem', marginLeft: '1.5rem' }}>
+                  <li>Windows network: //192.168.1.100/audiobooks</li>
+                  <li>Mapped drive: Z:/audiobooks</li>
+                  <li>Linux/Mac: /mnt/audiobooks or /media/audiobooks</li>
+                </ul>
+              </div>
+              <button 
+                className="btn btn-primary" 
+                onClick={onManualSubmit}
+                disabled={!manualPath.trim()}
+                style={{ marginTop: '1rem' }}
+              >
+                Use This Path
+              </button>
             </div>
           )}
 
@@ -1093,9 +1506,16 @@ echo
             <div style={{ textAlign: 'center', marginTop: '2rem' }}>
               <div className="selected-path">
                 <span style={{ fontSize: '1.5rem' }}>✅</span>
-                <span>{libraryPath}</span>
+                <span style={{ wordBreak: 'break-all' }}>{libraryPath}</span>
               </div>
-              <button className="btn btn-secondary" onClick={onSelect} style={{ marginTop: '1rem' }}>
+              <button 
+                className="btn btn-secondary" 
+                onClick={() => { 
+                  if (inputMode === 'browse') onSelect(); 
+                  else { setManualPath(''); window.location.reload(); }
+                }} 
+                style={{ marginTop: '1rem' }}
+              >
                 Change Location
               </button>
             </div>
@@ -1299,78 +1719,138 @@ echo
       );
     }
 
-    function StepPreviewChanges({ scanResults, isExecuting, executionProgress, onExecute, onGenerateScript, onBack }) {
+    function StepPreviewChanges({ scanResults, isExecuting, executionProgress, selectionMethod, onExecute, onGenerateScript, onGeneratePython, onBack }) {
       if (!scanResults) return null;
+
+      const isManualMode = selectionMethod === "manual";
 
       return (
         <div className="card">
-          <h2>👀 Preview Changes</h2>
+          <h2>{isManualMode ? '📝 Generate Organization Script' : '👀 Preview Changes'}</h2>
           <p style={{ marginTop: '1rem', color: 'var(--color-text-muted)' }}>
-            Review the proposed changes before applying them to your library.
+            {isManualMode 
+              ? 'Download a Python script that will scan and organize your library when run on a machine with access to the network share.'
+              : 'Review the proposed changes before applying them to your library.'
+            }
           </p>
 
-          <div className="alert alert-info" style={{ marginTop: '2rem' }}>
-            <strong>📝 How to Apply Changes:</strong>
-            <p style={{ marginTop: '0.5rem' }}>
-              Click "Download Move Script" to get a batch/shell script that will perform all the file operations. 
-              This is the safest method, especially for network folders, as you can review the script before running it.
-            </p>
-          </div>
-
-          {scanResults.plannedMoves.length > 0 && (
-            <>
-              <h3 style={{ marginTop: '2rem', marginBottom: '1rem' }}>
-                {scanResults.plannedMoves.length} Books to Reorganize
-              </h3>
-
-              <div className="preview-list">
-                {scanResults.plannedMoves.map((book, idx) => (
-                  <div key={idx} className="preview-item">
-                    <div className="preview-book-title">
-                      {book.title} <span style={{ color: 'var(--color-text-muted)', fontWeight: 'normal' }}>by {book.author}</span>
-                    </div>
-                    
-                    {book.oldPath !== book.newPath && (
-                      <div className="preview-change">
-                        <span className="preview-change-label">Folder:</span>
-                        <div>
-                          <div className="preview-old">- {book.oldPath}</div>
-                          <div className="preview-new">+ {book.newPath}</div>
-                        </div>
-                      </div>
-                    )}
-
-                    {book.movePlan.filter(m => m.oldName !== m.newName).length > 0 && (
-                      <div className="preview-change">
-                        <span className="preview-change-label">Files:</span>
-                        <div>
-                          {book.movePlan.filter(m => m.oldName !== m.newName).slice(0, 3).map((file, fIdx) => (
-                            <div key={fIdx}>
-                              <div className="preview-old">- {file.oldName}</div>
-                              <div className="preview-new">+ {file.newName}</div>
-                            </div>
-                          ))}
-                          {book.movePlan.filter(m => m.oldName !== m.newName).length > 3 && (
-                            <div style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem', marginTop: '0.25rem' }}>
-                              ...and {book.movePlan.filter(m => m.oldName !== m.newName).length - 3} more files
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ))}
+          {isManualMode ? (
+            <div>
+              <div className="alert alert-info" style={{ marginTop: '2rem' }}>
+                <strong>📱 Manual Path Mode</strong>
+                <p style={{ marginTop: '0.5rem' }}>
+                  Since you entered the path manually (perfect for network shares!), click below to download a 
+                  Python script. Run this script on any computer that has access to your library path, and it will:
+                </p>
+                <ul style={{ marginLeft: '1.5rem', marginTop: '0.5rem' }}>
+                  <li>Scan all metadata.json files in your library</li>
+                  <li>Organize books according to your selected format</li>
+                  <li>Show you a preview before making changes</li>
+                  <li>Move and rename files safely</li>
+                </ul>
               </div>
 
-              <div style={{ display: 'flex', gap: '1rem', marginTop: '2rem', justifyContent: 'center' }}>
+              <div style={{ textAlign: 'center', marginTop: '3rem', marginBottom: '2rem' }}>
                 <button 
                   className="btn btn-primary" 
-                  onClick={onGenerateScript}
-                  style={{ fontSize: '1.1rem', padding: '1rem 2.5rem' }}
+                  onClick={onGeneratePython}
+                  style={{ fontSize: '1.2rem', padding: '1.25rem 3rem' }}
                 >
-                  📥 Download Move Script
+                  🐍 Download Python Script
                 </button>
+                <p style={{ marginTop: '1rem', color: 'var(--color-text-muted)' }}>
+                  The script is configured with your preferences and ready to run
+                </p>
               </div>
+
+              <div className="alert alert-warning">
+                <strong>How to use the script:</strong>
+                <ol style={{ marginLeft: '1.5rem', marginTop: '0.5rem' }}>
+                  <li>Download the script (tidy_library.py)</li>
+                  <li>Copy it to a computer with Python 3 installed</li>
+                  <li>Run: <code style={{ background: 'rgba(0,0,0,0.1)', padding: '2px 6px', borderRadius: '3px' }}>python3 tidy_library.py "your/library/path"</code></li>
+                  <li>Review the changes and confirm</li>
+                </ol>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="alert alert-info" style={{ marginTop: '2rem' }}>
+                <strong>📝 Download Options:</strong>
+                <p style={{ marginTop: '0.5rem' }}>
+                  • <strong>Batch/Shell Script:</strong> Fast, direct file operations (best for local/mapped drives)<br/>
+                  • <strong>Python Script:</strong> Safer, cross-platform, with built-in error handling
+                </p>
+              </div>
+
+              {scanResults.plannedMoves.length > 0 && (
+                <>
+                  <h3 style={{ marginTop: '2rem', marginBottom: '1rem' }}>
+                    {scanResults.plannedMoves.length} Books to Reorganize
+                  </h3>
+
+                  <div className="preview-list">
+                    {scanResults.plannedMoves.map((book, idx) => (
+                      <div key={idx} className="preview-item">
+                        <div className="preview-book-title">
+                          {book.title} <span style={{ color: 'var(--color-text-muted)', fontWeight: 'normal' }}>by {book.author}</span>
+                        </div>
+                        
+                        {book.oldPath !== book.newPath && (
+                          <div className="preview-change">
+                            <span className="preview-change-label">Folder:</span>
+                            <div>
+                              <div className="preview-old">- {book.oldPath}</div>
+                              <div className="preview-new">+ {book.newPath}</div>
+                            </div>
+                          </div>
+                        )}
+
+                        {book.movePlan.filter(m => m.oldName !== m.newName).length > 0 && (
+                          <div className="preview-change">
+                            <span className="preview-change-label">Files:</span>
+                            <div>
+                              {book.movePlan.filter(m => m.oldName !== m.newName).slice(0, 3).map((file, fIdx) => (
+                                <div key={fIdx}>
+                                  <div className="preview-old">- {file.oldName}</div>
+                                  <div className="preview-new">+ {file.newName}</div>
+                                </div>
+                              ))}
+                              {book.movePlan.filter(m => m.oldName !== m.newName).length > 3 && (
+                                <div style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem', marginTop: '0.25rem' }}>
+                                  ...and {book.movePlan.filter(m => m.oldName !== m.newName).length - 3} more files
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '1rem', marginTop: '2rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+                    <button 
+                      className="btn btn-primary" 
+                      onClick={onGenerateScript}
+                    >
+                      📥 Download Batch/Shell Script
+                    </button>
+                    <button 
+                      className="btn btn-secondary" 
+                      onClick={onGeneratePython}
+                    >
+                      🐍 Download Python Script
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {scanResults.plannedMoves.length === 0 && (
+                <div className="alert alert-success" style={{ marginTop: '2rem' }}>
+                  <h3 style={{ marginBottom: '0.5rem' }}>✨ Great News!</h3>
+                  <p>Your library is already perfectly organized. No changes needed!</p>
+                </div>
+              )}
             </>
           )}
 
