@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  audiobookshelf-tidy:
+    image: yourusername/audiobookshelf-tidy:latest
+    container_name: audiobookshelf-tidy
+    ports:
+      - "3000:3000"
+    volumes:
+      # Mount your audiobook library here
+      # Examples:
+      #   - /mnt/audiobooks:/library
+      #   - /home/pi/audiobooks:/library
+      #   - /media/usbdrive/audiobooks:/library
+      - /path/to/your/audiobooks:/library
+    restart: unless-stopped
