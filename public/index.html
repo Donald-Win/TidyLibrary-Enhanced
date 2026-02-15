@@ -1,1 +1,618 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Audiobookshelf Library Tidy</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Crimson+Pro:wght@400;600;700&family=Work+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --color-bg: #faf8f3;
+      --color-surface: #ffffff;
+      --color-primary: #8b4513;
+      --color-primary-light: #a0522d;
+      --color-primary-dark: #654321;
+      --color-text: #2c1810;
+      --color-text-muted: #6b5d54;
+      --color-border: #e8dfd5;
+      --color-success: #2d5016;
+      --color-warning: #8b6914;
+      --color-error: #8b2e2e;
+      --color-info: #2e5c8b;
+      --shadow-sm: 0 1px 3px rgba(44, 24, 16, 0.05);
+      --shadow-md: 0 4px 12px rgba(44, 24, 16, 0.08);
+      --shadow-lg: 0 8px 24px rgba(44, 24, 16, 0.12);
+    }
 
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Work Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--color-bg);
+      color: var(--color-text);
+      line-height: 1.6;
+    }
+
+    #root {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    h1, h2, h3 {
+      font-family: 'Crimson Pro', Georgia, serif;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+
+    .app-header {
+      background: linear-gradient(135deg, var(--color-primary-dark) 0%, var(--color-primary) 100%);
+      color: var(--color-bg);
+      padding: 2rem;
+      box-shadow: var(--color-shadow-lg);
+    }
+
+    .header-content {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    .app-title {
+      font-size: 2.5rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 2rem;
+      flex: 1;
+    }
+
+    .card {
+      background: var(--color-surface);
+      border-radius: 12px;
+      padding: 2.5rem;
+      box-shadow: var(--shadow-md);
+      margin-bottom: 2rem;
+      border: 1px solid var(--color-border);
+    }
+
+    .btn {
+      padding: 0.875rem 2rem;
+      border-radius: 8px;
+      border: none;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .btn-primary {
+      background: var(--color-primary);
+      color: var(--color-bg);
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      background: var(--color-primary-light);
+    }
+
+    .btn-secondary {
+      background: var(--color-surface);
+      color: var(--color-primary);
+      border: 2px solid var(--color-primary);
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .btn-group {
+      display: flex;
+      gap: 1rem;
+      margin-top: 2rem;
+    }
+
+    input[type="text"] {
+      width: 100%;
+      padding: 0.875rem;
+      border-radius: 8px;
+      border: 2px solid var(--color-border);
+      font-size: 1rem;
+    }
+
+    .format-option {
+      padding: 1.5rem;
+      border: 2px solid var(--color-border);
+      border-radius: 8px;
+      cursor: pointer;
+      margin-bottom: 1rem;
+      transition: all 0.2s ease;
+    }
+
+    .format-option:hover {
+      border-color: var(--color-primary-light);
+    }
+
+    .format-option.selected {
+      border-color: var(--color-primary);
+      background: rgba(139, 69, 19, 0.05);
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1.5rem;
+      margin: 2rem 0;
+    }
+
+    .stat-card {
+      background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-light) 100%);
+      color: white;
+      padding: 1.5rem;
+      border-radius: 8px;
+    }
+
+    .stat-value {
+      font-size: 2.5rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+    }
+
+    .stat-label {
+      font-size: 0.9rem;
+      opacity: 0.9;
+    }
+
+    .preview-list {
+      max-height: 500px;
+      overflow-y: auto;
+      border: 1px solid var(--color-border);
+      border-radius: 8px;
+      background: var(--color-bg);
+    }
+
+    .preview-item {
+      padding: 1.5rem;
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    .preview-book-title {
+      font-weight: 600;
+      font-size: 1.1rem;
+      color: var(--color-primary);
+      margin-bottom: 0.75rem;
+    }
+
+    .preview-change {
+      font-size: 0.9rem;
+      margin-top: 0.5rem;
+    }
+
+    .preview-old {
+      color: var(--color-error);
+      text-decoration: line-through;
+    }
+
+    .preview-new {
+      color: var(--color-success);
+      font-weight: 500;
+    }
+
+    .alert {
+      padding: 1.25rem 1.5rem;
+      border-radius: 8px;
+      margin-bottom: 1.5rem;
+      border-left: 4px solid;
+    }
+
+    .alert-info {
+      background: rgba(46, 92, 139, 0.1);
+      border-color: var(--color-info);
+      color: var(--color-info);
+    }
+
+    .alert-success {
+      background: rgba(45, 80, 22, 0.1);
+      border-color: var(--color-success);
+      color: var(--color-success);
+    }
+
+    .alert-error {
+      background: rgba(139, 46, 46, 0.1);
+      border-color: var(--color-error);
+      color: var(--color-error);
+    }
+
+    .spinner {
+      border: 3px solid var(--color-border);
+      border-top-color: var(--color-primary);
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      animation: spin 0.8s linear infinite;
+      margin: 2rem auto;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .progress-bar {
+      height: 8px;
+      background: var(--color-border);
+      border-radius: 4px;
+      overflow: hidden;
+      margin: 1rem 0;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: var(--color-primary);
+      transition: width 0.3s ease;
+    }
+
+    @media (max-width: 768px) {
+      .container { padding: 1rem; }
+      .card { padding: 1.5rem; }
+      .btn-group { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState } = React;
+
+    const formatDuration = (seconds) => {
+      if (!seconds) return "0h 0m";
+      const days = Math.floor(seconds / 86400);
+      const h = Math.floor((seconds % 86400) / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      if (days > 0) return `${days}d ${h}h ${m}m`;
+      return `${h}h ${m}m`;
+    };
+
+    const formatBytes = (bytes) => {
+      return (bytes / (1024 ** 3)).toFixed(2);
+    };
+
+    function App() {
+      const [step, setStep] = useState(1);
+      const [libraryPath, setLibraryPath] = useState("");
+      const [formatConfig, setFormatConfig] = useState({
+        folderFormat: "author-series-book",
+        fileFormat: "full-details"
+      });
+      const [scanResults, setScanResults] = useState(null);
+      const [isScanning, setIsScanning] = useState(false);
+      const [isExecuting, setIsExecuting] = useState(false);
+      const [executionResults, setExecutionResults] = useState(null);
+      const [error, setError] = useState("");
+
+      const scanLibrary = async () => {
+        setIsScanning(true);
+        setError("");
+        
+        try {
+          const response = await fetch('/api/scan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ libraryPath, formatConfig })
+          });
+
+          if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.error || 'Scan failed');
+          }
+
+          const results = await response.json();
+          setScanResults(results);
+          setStep(3);
+        } catch (err) {
+          setError(err.message);
+        } finally {
+          setIsScanning(false);
+        }
+      };
+
+      const executeChanges = async () => {
+        setIsExecuting(true);
+        setError("");
+
+        try {
+          const response = await fetch('/api/execute', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ plannedMoves: scanResults.plannedMoves })
+          });
+
+          if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.error || 'Execution failed');
+          }
+
+          const results = await response.json();
+          setExecutionResults(results);
+          setStep(4);
+        } catch (err) {
+          setError(err.message);
+        } finally {
+          setIsExecuting(false);
+        }
+      };
+
+      return (
+        <>
+          <header className="app-header">
+            <div className="header-content">
+              <h1 className="app-title">📚 Audiobookshelf Library Tidy</h1>
+              <p>Organize your audiobook library with precision and ease</p>
+            </div>
+          </header>
+
+          <div className="container">
+            {error && (
+              <div className="alert alert-error">
+                <strong>Error:</strong> {error}
+              </div>
+            )}
+
+            {step === 1 && (
+              <div className="card">
+                <h2>📁 Enter Library Path</h2>
+                <p style={{ marginTop: '1rem', color: 'var(--color-text-muted)' }}>
+                  Enter the path to your Audiobookshelf library on the server.
+                </p>
+
+                <div className="alert alert-info" style={{ marginTop: '2rem' }}>
+                  <strong>💡 Examples:</strong>
+                  <ul style={{ marginTop: '0.5rem', marginLeft: '1.5rem' }}>
+                    <li>/mnt/audiobooks</li>
+                    <li>/data/library</li>
+                    <li>/volume1/audiobooks</li>
+                  </ul>
+                </div>
+
+                <div style={{ marginTop: '2rem' }}>
+                  <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600 }}>
+                    Library Path:
+                  </label>
+                  <input 
+                    type="text"
+                    value={libraryPath}
+                    onChange={(e) => setLibraryPath(e.target.value)}
+                    placeholder="/mnt/audiobooks"
+                  />
+                </div>
+
+                <div className="btn-group" style={{ justifyContent: 'flex-end' }}>
+                  <button 
+                    className="btn btn-primary" 
+                    onClick={() => setStep(2)}
+                    disabled={!libraryPath.trim()}
+                  >
+                    Continue →
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {step === 2 && (
+              <div className="card">
+                <h2>⚙️ Configure Format</h2>
+
+                <div style={{ marginTop: '2rem' }}>
+                  <h3 style={{ marginBottom: '1rem' }}>Folder Structure</h3>
+                  
+                  <div 
+                    className={`format-option ${formatConfig.folderFormat === 'author-series-book' ? 'selected' : ''}`}
+                    onClick={() => setFormatConfig({...formatConfig, folderFormat: 'author-series-book'})}
+                  >
+                    <div style={{ fontWeight: 600, marginBottom: '0.5rem' }}>
+                      {formatConfig.folderFormat === 'author-series-book' && '✓ '}
+                      Author / Series / Book
+                    </div>
+                    <div style={{ fontSize: '0.85rem', fontFamily: 'monospace', color: 'var(--color-text-muted)' }}>
+                      Brandon Sanderson / Mistborn / 01 The Final Empire
+                    </div>
+                  </div>
+
+                  <div 
+                    className={`format-option ${formatConfig.folderFormat === 'author-book' ? 'selected' : ''}`}
+                    onClick={() => setFormatConfig({...formatConfig, folderFormat: 'author-book'})}
+                  >
+                    <div style={{ fontWeight: 600, marginBottom: '0.5rem' }}>
+                      {formatConfig.folderFormat === 'author-book' && '✓ '}
+                      Author / Book
+                    </div>
+                    <div style={{ fontSize: '0.85rem', fontFamily: 'monospace', color: 'var(--color-text-muted)' }}>
+                      Brandon Sanderson / The Final Empire
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ marginTop: '2rem' }}>
+                  <h3 style={{ marginBottom: '1rem' }}>File Naming</h3>
+                  
+                  <div 
+                    className={`format-option ${formatConfig.fileFormat === 'full-details' ? 'selected' : ''}`}
+                    onClick={() => setFormatConfig({...formatConfig, fileFormat: 'full-details'})}
+                  >
+                    <div style={{ fontWeight: 600, marginBottom: '0.5rem' }}>
+                      {formatConfig.fileFormat === 'full-details' && '✓ '}
+                      Full Details
+                    </div>
+                    <div style={{ fontSize: '0.85rem', fontFamily: 'monospace', color: 'var(--color-text-muted)' }}>
+                      Brandon Sanderson - Mistborn 01 - The Final Empire - 01.mp3
+                    </div>
+                  </div>
+
+                  <div 
+                    className={`format-option ${formatConfig.fileFormat === 'title-only' ? 'selected' : ''}`}
+                    onClick={() => setFormatConfig({...formatConfig, fileFormat: 'title-only'})}
+                  >
+                    <div style={{ fontWeight: 600, marginBottom: '0.5rem' }}>
+                      {formatConfig.fileFormat === 'title-only' && '✓ '}
+                      Title Only
+                    </div>
+                    <div style={{ fontSize: '0.85rem', fontFamily: 'monospace', color: 'var(--color-text-muted)' }}>
+                      The Final Empire - 01.mp3
+                    </div>
+                  </div>
+
+                  <div 
+                    className={`format-option ${formatConfig.fileFormat === 'keep-original' ? 'selected' : ''}`}
+                    onClick={() => setFormatConfig({...formatConfig, fileFormat: 'keep-original'})}
+                  >
+                    <div style={{ fontWeight: 600, marginBottom: '0.5rem' }}>
+                      {formatConfig.fileFormat === 'keep-original' && '✓ '}
+                      Keep Original Names
+                    </div>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)' }}>
+                      Only reorganize folders
+                    </div>
+                  </div>
+                </div>
+
+                <div className="btn-group">
+                  <button className="btn btn-secondary" onClick={() => setStep(1)}>
+                    ← Back
+                  </button>
+                  <button 
+                    className="btn btn-primary" 
+                    onClick={scanLibrary}
+                    disabled={isScanning}
+                  >
+                    {isScanning ? 'Scanning...' : 'Scan Library →'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {step === 3 && scanResults && (
+              <div className="card">
+                <h2>📊 Scan Results</h2>
+
+                <div className="stats-grid">
+                  <div className="stat-card">
+                    <div className="stat-value">{scanResults.stats.books}</div>
+                    <div className="stat-label">Books</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-value">{scanResults.stats.authors}</div>
+                    <div className="stat-label">Authors</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-value">{scanResults.stats.series}</div>
+                    <div className="stat-label">Series</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-value">{formatDuration(scanResults.stats.totalDuration)}</div>
+                    <div className="stat-label">Duration</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-value">{formatBytes(scanResults.stats.totalSize)} GB</div>
+                    <div className="stat-label">Size</div>
+                  </div>
+                </div>
+
+                {scanResults.plannedMoves.length === 0 ? (
+                  <div className="alert alert-success">
+                    <h3>✨ Great News!</h3>
+                    <p>Your library is already perfectly organized!</p>
+                  </div>
+                ) : (
+                  <>
+                    <h3 style={{ marginTop: '2rem', marginBottom: '1rem' }}>
+                      {scanResults.plannedMoves.length} Books to Reorganize
+                    </h3>
+
+                    <div className="preview-list">
+                      {scanResults.plannedMoves.slice(0, 20).map((book, idx) => (
+                        <div key={idx} className="preview-item">
+                          <div className="preview-book-title">
+                            {book.title} <span style={{ fontWeight: 'normal', color: 'var(--color-text-muted)' }}>by {book.author}</span>
+                          </div>
+                          
+                          {book.oldPath !== book.newPath && (
+                            <div className="preview-change">
+                              <div className="preview-old">- {book.oldPath}</div>
+                              <div className="preview-new">+ {book.newPath}</div>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+
+                    {scanResults.plannedMoves.length > 20 && (
+                      <p style={{ textAlign: 'center', marginTop: '1rem', color: 'var(--color-text-muted)' }}>
+                        ...and {scanResults.plannedMoves.length - 20} more books
+                      </p>
+                    )}
+                  </>
+                )}
+
+                <div className="btn-group">
+                  <button className="btn btn-secondary" onClick={() => setStep(2)}>
+                    ← Back
+                  </button>
+                  <button 
+                    className="btn btn-primary" 
+                    onClick={executeChanges}
+                    disabled={scanResults.plannedMoves.length === 0 || isExecuting}
+                  >
+                    {isExecuting ? 'Organizing...' : 'Apply Changes ✓'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {step === 4 && executionResults && (
+              <div className="card">
+                <h2>🎉 Complete!</h2>
+                
+                <div className="alert alert-success" style={{ marginTop: '2rem' }}>
+                  <h3>✓ Library Organized</h3>
+                  <p>Successfully reorganized {executionResults.applied} books!</p>
+                  {executionResults.errors > 0 && (
+                    <p style={{ marginTop: '0.5rem' }}>
+                      {executionResults.errors} errors occurred during processing.
+                    </p>
+                  )}
+                </div>
+
+                <div style={{ textAlign: 'center', marginTop: '2rem' }}>
+                  <button 
+                    className="btn btn-primary" 
+                    onClick={() => {
+                      setStep(1);
+                      setLibraryPath("");
+                      setScanResults(null);
+                      setExecutionResults(null);
+                      setError("");
+                    }}
+                  >
+                    Organize Another Library
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </>
+      );
+    }
+
+    ReactDOM.render(<App />, document.getElementById('root'));
+  </script>
+</body>
+</html>
